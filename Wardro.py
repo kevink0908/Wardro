@@ -326,6 +326,15 @@ def build_ui():
             )
             refresh = gr.Button("Refresh history")
 
+        # When the user toggles between City+State and Zip code, clear the box
+        # (and give it a matching placeholder) so leftover text doesn't get sent
+        # to the wrong geocoder. gr.update() lets us change a component's props.
+        def on_mode_change(new_mode):
+            hint = "78701" if new_mode == "Zip code" else "e.g. Austin, TX"
+            return gr.update(value="", placeholder=hint)
+
+        mode.change(fn=on_mode_change, inputs=mode, outputs=location)
+
         # On click, call respond(location, mode) and send its TWO return values
         # into [output, history]. Pressing Enter in the box does the same.
         go.click(fn=respond, inputs=[location, mode], outputs=[output, history])
