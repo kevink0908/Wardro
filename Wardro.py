@@ -13,6 +13,10 @@ NOTE: The output of the geocoding API call becomes the input to the weather API 
  
 How to Run:   python Wardro.py    (then open the local URL it prints)
 """
+import sqlite3
+from datetime import datetime
+from pathlib import Path
+
 import requests
 import gradio as gr
 import urllib3
@@ -24,6 +28,11 @@ SESSION = requests.Session()
 SESSION.verify = False
 TIMEOUT = 10  # seconds
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+
+# The database is a single file that lives right next to this script.
+# SQLite is "serverless": there's no separate database program to install or
+# run — the whole database is just this one file on disk.
+DB_PATH = Path(__file__).with_name("wardro.db")
  
  
 # ---------------------------------------------------------------------------
@@ -66,6 +75,73 @@ WEATHER_CODES = {
 }
  
  
+# ---------------------------------------------------------------------------
+# LAYER 1.5: THE DATABASE (SQLite) — persist every lookup so we have a history
+# ---------------------------------------------------------------------------
+# SQLite vocabulary, in the order you use it:
+#   connection = sqlite3.connect(file)  -> opens (or creates) the database file.
+#   .execute("SQL", params)             -> runs one SQL statement.
+#   ? placeholders                      -> safe way to insert values (see below).
+#   .commit()                           -> SAVE. Without it, writes are discarded.
+#   .fetchall()                         -> read all rows a SELECT returned.
+#   .close()                            -> release the file.
+# The four basic operations (CRUD): CREATE/INSERT (write), SELECT (read),
+# UPDATE (change), DELETE (remove). We use CREATE TABLE, INSERT, and SELECT.
+
+def init_db():
+    """Create the 'searches' table if it doesn't exist yet.
+
+    Safe to call on every startup: 'IF NOT EXISTS' creates the table the first
+    time and does nothing on later runs.
+    """
+    conn = sqlite3.connect(DB_PATH)
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS searches (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,  -- unique row id, auto-numbered
+            searched_at TEXT    NOT NULL,                   -- timestamp as text
+            location    TEXT    NOT NULL,
+            temp_f      REAL    NOT NULL,                   -- REAL = a decimal number
+            advice      TEXT    NOT NULL
+        )
+        """
+    )
+    conn.commit()
+    conn.close()
+
+
+def save_search(location: str, temp_f: float, advice: str):
+    """INSERT one row recording a lookup.
+
+    SECURITY NOTE — the single most important SQLite habit: pass values as a
+    tuple and use ? placeholders. NEVER build SQL with f-strings/+ and user
+    input. The ? form lets SQLite handle escaping, preventing SQL injection.
+    """
+    conn = sqlite3.connect(DB_PATH)
+    conn.execute(
+        "INSERT INTO searches (searched_at, location, temp_f, advice) VALUES (?, ?, ?, ?)",
+        (datetime.now().isoformat(timespec="seconds"), location, temp_f, advice),
+    )
+    conn.commit()  # without this line, nothing is actually saved
+    conn.close()
+
+
+def get_history(limit: int = 10):
+    """SELECT the most recent lookups, newest first.
+
+    row_factory = sqlite3.Row lets us read columns by name (row["location"]).
+    ORDER BY id DESC = newest first; LIMIT caps how many rows come back.
+    """
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    rows = conn.execute(
+        "SELECT searched_at, location, temp_f, advice FROM searches ORDER BY id DESC LIMIT ?",
+        (limit,),
+    ).fetchall()
+    conn.close()
+    return rows
+
+
 # ---------------------------------------------------------------------------
 # LAYER 2: THE API CALLS
 # ---------------------------------------------------------------------------
@@ -176,6 +252,9 @@ def recommend(location: str, mode: str) -> str:
  
         # Step 3: temperature  ->  outfit advice
         advice = outfit_advice(temp)
+
+        # Step 4: persist this lookup to the database so it shows in history.
+        save_search(label, temp, advice)
  
         return (
             f"### \U0001F4CD {label}\n"
@@ -195,11 +274,32 @@ def recommend(location: str, mode: str) -> str:
         return f"⚠️ Something went wrong: {e}"
  
  
+def load_history():
+    """Read recent searches from the DB and shape them for a Gradio table.
+
+    gr.Dataframe wants a plain list-of-lists (one inner list per row), so we
+    convert each sqlite3.Row into [when, location, temp, advice].
+    """
+    rows = get_history(limit=10)
+    return [
+        [r["searched_at"], r["location"], f"{r['temp_f']:.0f}°F", r["advice"]]
+        for r in rows
+    ]
+
+
+def respond(location: str, mode: str):
+    """UI handler: run the recommendation, then return BOTH the advice text and
+    the refreshed history table. Gradio sends each returned value to the
+    matching component listed in outputs=[...]."""
+    md = recommend(location, mode)
+    return md, load_history()
+
+
 # ---------------------------------------------------------------------------
 # LAYER 4: Building web interface via Gradio
 # ---------------------------------------------------------------------------
 def build_ui():
-    with gr.Blocks(title="Wardro") as demo:
+    with gr.Blocks(title="Wardro", theme=gr.themes.Soft()) as demo:
         gr.Markdown(
             "# \U0001F9E5 Wardro\n"
             "Tell me where you are and I'll tell you what to wear, based on today's weather."
@@ -216,11 +316,25 @@ def build_ui():
         )
         go = gr.Button("What should I wear?", variant="primary")
         output = gr.Markdown()
- 
-        # Wire the button: on click, call recommend(location, mode) and put the
-        # returned string into 'output'. Pressing Enter in the box does the same.
-        go.click(fn=recommend, inputs=[location, mode], outputs=output)
-        location.submit(fn=recommend, inputs=[location, mode], outputs=output)
+
+        # A collapsible panel showing past lookups pulled from the database.
+        with gr.Accordion("📜 Search history (from the database)", open=False):
+            history = gr.Dataframe(
+                headers=["When", "Location", "Temp", "Advice"],
+                interactive=False,
+                wrap=True,
+            )
+            refresh = gr.Button("Refresh history")
+
+        # On click, call respond(location, mode) and send its TWO return values
+        # into [output, history]. Pressing Enter in the box does the same.
+        go.click(fn=respond, inputs=[location, mode], outputs=[output, history])
+        location.submit(fn=respond, inputs=[location, mode], outputs=[output, history])
+
+        # The refresh button just re-reads the DB into the table; demo.load runs
+        # once on page open so history is populated at startup.
+        refresh.click(fn=load_history, inputs=None, outputs=history)
+        demo.load(fn=load_history, inputs=None, outputs=history)
  
         gr.Markdown(
             "<sub>Weather by Open-Meteo · Zip lookup by Zippopotam.us · both free, no API key.</sub>"
@@ -229,4 +343,5 @@ def build_ui():
  
  
 if __name__ == "__main__":
-    build_ui().launch(theme=gr.themes.Soft())
+    init_db()  # make sure the table exists before the app starts
+    build_ui().launch()
