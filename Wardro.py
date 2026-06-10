@@ -76,9 +76,9 @@ WEATHER_CODES = {
  
  
 # ---------------------------------------------------------------------------
-# LAYER 1.5: THE DATABASE (SQLite) — persist every lookup so we have a history
+# LAYER 1.5: SQLite DB
 # ---------------------------------------------------------------------------
-# SQLite vocabulary, in the order you use it:
+# SQLite vocabulary in the order to be used:
 #   connection = sqlite3.connect(file)  -> opens (or creates) the database file.
 #   .execute("SQL", params)             -> runs one SQL statement.
 #   ? placeholders                      -> safe way to insert values (see below).
@@ -94,7 +94,9 @@ def init_db():
     Safe to call on every startup: 'IF NOT EXISTS' creates the table the first
     time and does nothing on later runs.
     """
+    # sqlite3.connect(DB_PATH) will open/create the .db file.
     conn = sqlite3.connect(DB_PATH)
+    # create table
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS searches (
@@ -118,11 +120,15 @@ def save_search(location: str, temp_f: float, advice: str):
     input. The ? form lets SQLite handle escaping, preventing SQL injection.
     """
     conn = sqlite3.connect(DB_PATH)
+    # stop SQL injection by passing values as a separate tuple without gluing
+    # user input into the SQL string. 
+    # NOTE: ? are the placeholders.
     conn.execute(
         "INSERT INTO searches (searched_at, location, temp_f, advice) VALUES (?, ?, ?, ?)",
         (datetime.now().isoformat(timespec="seconds"), location, temp_f, advice),
     )
-    conn.commit()  # without this line, nothing is actually saved
+    # save the write 
+    conn.commit() 
     conn.close()
 
 
@@ -134,6 +140,7 @@ def get_history(limit: int = 10):
     """
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
+    # read the history.
     rows = conn.execute(
         "SELECT searched_at, location, temp_f, advice FROM searches ORDER BY id DESC LIMIT ?",
         (limit,),
