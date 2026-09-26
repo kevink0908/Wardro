@@ -342,5 +342,6 @@ Wardro/
 - **Adopt the 2026-07-28 MCP spec** (the servers currently speak the earlier protocol version).
 
 ## Author
-
-**Kevin Kim** · [GitHub](https://github.com/kevink0908)
+Kevin Kim  
+M.S. Candidate, Computer Science – Artificial Intelligence  
+USC Viterbi School of Engineering
