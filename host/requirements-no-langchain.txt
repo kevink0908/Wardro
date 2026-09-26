@@ -1,0 +1,6 @@
+# host/host.py — the no-LangChain backend variant. Three deps total:
+fastapi>=0.110      # web framework (/chat, /closet, /images, /wear-log, /tools)
+uvicorn>=0.29       # ASGI server that runs it
+google-genai>=1.0   # Gemini via Vertex AI (ADC auth — no API key in code)
+# The MCP client is host/mcp_client.py — pure stdlib, nothing to install.
+# (backend.py, the LangChain variant, keeps its own requirements.txt.)

@@ -1,0 +1,3 @@
+# wardrobe-closet MCP server — clothing inventory tools.
+# Speaks MCP BY HAND over Streamable HTTP (shared/mcp_server.py). No `mcp`/FastMCP.
+# No third-party dependencies: shared/wardrobe.py + the Python standard library.

@@ -1,38 +1,61 @@
 r"""
-Description: Wardro.py is a tiny weather-based outfit advisor.
- 
-Chaining API calls:
-  1. A GEOCODING api: turns "Austin, Texas" or zip "78701" into latitude/longitude.
-       - City+state  -> Open-Meteo Geocoding:  https://geocoding-api.open-meteo.com/v1/search
-       - US zip code -> Zippopotam.us:          https://api.zippopotam.us/us/{zip}
- 
-  2. A WEATHER api: turns latitude/longitude into the current temperature.
-       - Open-Meteo Forecast:  https://api.open-meteo.com/v1/forecast
- 
-NOTE: The output of the geocoding API call becomes the input to the weather API call.
- 
-How to Run:   python Wardro.py    (then open the local URL it prints)
+HTTP client wrapper for the weather functions that uses urllib instead of the 
+"requests" library (sends requests out and reads responses).
 """
 import sqlite3
 from datetime import datetime
 from pathlib import Path
 
-import requests
-import gradio as gr
-import urllib3
+import json
+import urllib.parse
+import urllib.request
+import urllib.error
+# ── (Optional) corporate SSL — only needed if you hit certificate errors ──
+# On a corporate machine behind SSL inspection, Python's bundled certificates
+# may not include the company's root CA, so HTTPS calls fail with a cert error.
+# If (and only if) that happens: `pip install truststore` and uncomment the two
+# lines below — they make Python trust the OS certificate store.
+# import truststore
+# truststore.inject_into_ssl()
  
-# A shared requests.Session reuses the underlying TCP connection across calls —
-# a tiny performance win and a good habit. timeout= prevents the app from
-# hanging forever if a server is slow.
-SESSION = requests.Session()
-SESSION.verify = False
+# ── Stdlib HTTP (urllib) — replaces the third-party `requests` library ──
+# A tiny stand-in for the one requests feature we used: SESSION.get(url, params,
+# timeout) returning an object with .json() / .raise_for_status() / .status_code.
+# This way the 4 weather functions below stay UNCHANGED, but we depend only on
+# Python's built-in urllib — nothing to pip-install.
+class _Resp:
+    def __init__(self, status_code, body):
+        self.status_code = status_code
+        self._body = body
+    def json(self):
+        return json.loads(self._body)
+    def raise_for_status(self):
+        if self.status_code >= 400:
+            raise urllib.error.URLError(f"HTTP {self.status_code}")
+
+
+class _StdlibSession:
+    def get(self, url, params=None, timeout=10):
+        if params:
+            url = url + "?" + urllib.parse.urlencode(params)
+        req = urllib.request.Request(url, headers={"User-Agent": "wardro/1.0"})
+        try:
+            with urllib.request.urlopen(req, timeout=timeout) as r:
+                return _Resp(r.status, r.read().decode())
+        except urllib.error.HTTPError as e:            # 404/500/... -> keep the code
+            return _Resp(e.code, e.read().decode() if e.fp else "")
+
+
+SESSION = _StdlibSession()
 TIMEOUT = 10  # seconds
-urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 # The database is a single file that lives right next to this script.
 # SQLite is "serverless": there's no separate database program to install or
 # run — the whole database is just this one file on disk.
-DB_PATH = Path(__file__).with_name("wardro.db")
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+DATA_DIR = PROJECT_ROOT / "data"
+DATA_DIR.mkdir(exist_ok=True)
+DB_PATH = DATA_DIR / "wardro.db"
  
  
 # ---------------------------------------------------------------------------
@@ -223,141 +246,57 @@ def get_current_weather(lat: float, lon: float):
     return resp.json()["current"]
  
  
-# ---------------------------------------------------------------------------
-# LAYER 3: Chaining API Calls + Error Handling
-# ---------------------------------------------------------------------------
-def recommend(location: str, mode: str) -> str:
-    """Top-level handler the Gradio button calls.
- 
-    'mode' is "City + State" or "Zip code". Returns a Markdown string.
-    All network/JSON errors are caught and turned into a friendly message so
-    the app never crashes on bad input.
+def get_hourly_forecast(lat: float, lon: float, date: str, hour: int) -> dict:
+    """Fetch forecast conditions for a specific date and hour.
+
+    Uses the same Open-Meteo endpoint as get_current_weather, but requests
+    hourly data instead of current. The API returns arrays of hourly values
+    for the next 7 days; we find the matching time slot and return it.
+
+    Args:
+        lat: Latitude.
+        lon: Longitude.
+        date: ISO date string like "2026-06-17".
+        hour: Hour of day, 0-23 (e.g. 9 = 9:00 AM), in the LOCAL time of the
+            location being queried (see "timezone": "auto" below).
+
+    Returns:
+        Dict with temp_f, feels_like_f, humidity, wind_mph, sky — same
+        shape as get_current_weather so outfit_advice works on it.
+
+    Raises:
+        ValueError: If the requested date/hour isn't in the forecast range.
     """
-    location = (location or "").strip()
-    if not location:
-        return "Please enter a location first."
- 
-    try:
-        # Step 1: location text  ->  latitude/longitude
-        if mode == "Zip code":
-            lat, lon, label = geocode_zip(location)
-        else:
-            # Allow "Austin, TX" or "Austin, Texas" or just "Austin".
-            if "," in location:
-                city, state = location.split(",", 1)
-            else:
-                city, state = location, ""
-            lat, lon, label = geocode_city(city.strip(), state.strip())
- 
-        # Step 2: latitude/longitude  ->  current weather
-        cur = get_current_weather(lat, lon)
-        temp = cur["temperature_2m"]
-        feels = cur.get("apparent_temperature", temp)
-        humidity = cur.get("relative_humidity_2m")
-        wind = cur.get("wind_speed_10m")
-        sky = WEATHER_CODES.get(cur.get("weather_code"), "—")
- 
-        # Step 3: temperature  ->  outfit advice
-        advice = outfit_advice(temp)
+    url = "https://api.open-meteo.com/v1/forecast"
+    params = {
+        "latitude": lat,
+        "longitude": lon,
+        "hourly": "temperature_2m,apparent_temperature,relative_humidity_2m,weather_code,wind_speed_10m",
+        "temperature_unit": "fahrenheit",
+        "wind_speed_unit": "mph",
+        # CRITICAL: without this, Open-Meteo returns hourly timestamps in GMT —
+        # asking for "12:00" in California would actually fetch 5 AM conditions.
+        # "auto" = timestamps in the local timezone of the lat/lon queried.
+        "timezone": "auto",
+    }
+    resp = SESSION.get(url, params=params, timeout=TIMEOUT)
+    resp.raise_for_status()
+    data = resp.json()["hourly"]
 
-        # Step 4: persist this lookup to the database so it shows in history.
-        save_search(label, temp, advice)
- 
-        return (
-            f"### \U0001F4CD {label}\n"
-            f"**{temp:.0f}°F** (feels like {feels:.0f}°F) · {sky}\n\n"
-            f"Humidity {humidity}%  ·  Wind {wind:.0f} mph\n\n"
-            f"---\n\n"
-            f"### What to wear\n{advice}"
+    # Build the target timestamp string: "2026-06-17T09:00"
+    target = f"{date}T{hour:02d}:00"
+
+    if target not in data["time"]:
+        raise ValueError(
+            f"No forecast available for {target}. "
+            f"Range: {data['time'][0]} to {data['time'][-1]}"
         )
- 
-    except ValueError as e:
-        # Our own "not found" errors — show the message as-is.
-        return f"⚠️ {e}"
-    except requests.RequestException as e:
-        # Network/HTTP problems (no internet, server down, timeout).
-        return f"⚠️ Couldn't reach the weather service: {e}"
-    except Exception as e:
-        return f"⚠️ Something went wrong: {e}"
- 
- 
-def load_history():
-    """Read recent searches from the DB and shape them for a Gradio table.
 
-    gr.Dataframe wants a plain list-of-lists (one inner list per row), so we
-    convert each sqlite3.Row into [when, location, temp, advice].
-    """
-    rows = get_history(limit=10)
-    return [
-        [r["searched_at"], r["location"], f"{r['temp_f']:.0f}°F", r["advice"]]
-        for r in rows
-    ]
-
-
-def respond(location: str, mode: str):
-    """UI handler: run the recommendation, then return BOTH the advice text and
-    the refreshed history table. Gradio sends each returned value to the
-    matching component listed in outputs=[...]."""
-    md = recommend(location, mode)
-    return md, load_history()
-
-
-# ---------------------------------------------------------------------------
-# LAYER 4: Building web interface via Gradio
-# ---------------------------------------------------------------------------
-def build_ui():
-    with gr.Blocks(title="Wardro", theme=gr.themes.Soft()) as demo:
-        gr.Markdown(
-            "# \U0001F9E5 Wardro\n"
-            "Tell me where you are and I'll tell you what to wear, based on today's weather."
-        )
-        with gr.Row():
-            mode = gr.Radio(
-                choices=["City + State", "Zip code"],
-                value="City + State",
-                label="Look up by",
-            )
-        location = gr.Textbox(
-            label="Location",
-            placeholder="e.g. Austin, TX   (or switch to Zip and enter 78701)",
-        )
-        go = gr.Button("What should I wear?", variant="primary")
-        output = gr.Markdown()
-
-        # A collapsible panel showing past lookups pulled from the database.
-        with gr.Accordion("📜 Search history (from the database)", open=False):
-            history = gr.Dataframe(
-                headers=["When", "Location", "Temp", "Advice"],
-                interactive=False,
-                wrap=True,
-            )
-            refresh = gr.Button("Refresh history")
-
-        # When the user toggles between City+State and Zip code, clear the box
-        # (and give it a matching placeholder) so leftover text doesn't get sent
-        # to the wrong geocoder. gr.update() lets us change a component's props.
-        def on_mode_change(new_mode):
-            hint = "78701" if new_mode == "Zip code" else "e.g. Austin, TX"
-            return gr.update(value="", placeholder=hint)
-
-        mode.change(fn=on_mode_change, inputs=mode, outputs=location)
-
-        # On click, call respond(location, mode) and send its TWO return values
-        # into [output, history]. Pressing Enter in the box does the same.
-        go.click(fn=respond, inputs=[location, mode], outputs=[output, history])
-        location.submit(fn=respond, inputs=[location, mode], outputs=[output, history])
-
-        # The refresh button just re-reads the DB into the table; demo.load runs
-        # once on page open so history is populated at startup.
-        refresh.click(fn=load_history, inputs=None, outputs=history)
-        demo.load(fn=load_history, inputs=None, outputs=history)
- 
-        gr.Markdown(
-            "<sub>Weather by Open-Meteo · Zip lookup by Zippopotam.us · both free, no API key.</sub>"
-        )
-    return demo
- 
- 
-if __name__ == "__main__":
-    init_db()  # make sure the table exists before the app starts
-    build_ui().launch()
+    idx = data["time"].index(target)
+    return {
+        "temperature_2m": data["temperature_2m"][idx],
+        "apparent_temperature": data["apparent_temperature"][idx],
+        "relative_humidity_2m": data["relative_humidity_2m"][idx],
+        "weather_code": data["weather_code"][idx],
+        "wind_speed_10m": data["wind_speed_10m"][idx],
+    }

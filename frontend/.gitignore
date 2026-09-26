@@ -1,0 +1,8 @@
+# dependencies
+/node_modules
+
+# Next.js build output
+/.next
+
+# secrets / env files (keeps your OAuth keys out of git)
+.env*.local

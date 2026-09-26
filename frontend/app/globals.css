@@ -1,0 +1,26 @@
+/* This one line pulls in all of Tailwind's utility classes (Tailwind v4). */
+@import "tailwindcss";
+
+/* Whole-page background (neutral gray). */
+body {
+  background-color: #A9A9A9;
+}
+
+/* ── Markdown inside the bot's chat bubbles (see page.js → className="md") ──
+   Tailwind v4 resets headings/lists to plain text, so give them back some shape. */
+.md > * + * { margin-top: 0.6rem; }
+.md h1, .md h2, .md h3, .md h4 { font-weight: 600; color: #0B2447; line-height: 1.3; }
+.md h1 { font-size: 1.25rem; }
+.md h2 { font-size: 1.125rem; }
+.md h3 { font-size: 1.05rem; margin-top: 1rem; }
+.md h4 { font-size: 1rem; margin-top: 0.8rem; }
+.md strong { font-weight: 600; color: #0f172a; }
+.md em { font-style: italic; }
+.md ul { list-style: disc; padding-left: 1.25rem; }
+.md ol { list-style: decimal; padding-left: 1.25rem; }
+.md li + li { margin-top: 0.25rem; }
+.md hr { border: 0; border-top: 1px solid #cbd5e1; margin: 1rem 0; }
+.md code { background: #e2e8f0; border-radius: 4px; padding: 0.1rem 0.3rem; font-size: 0.9em; }
+.md a { color: #0E9384; text-decoration: underline; }
+.md table { border-collapse: collapse; font-size: 0.95em; }
+.md th, .md td { border: 1px solid #cbd5e1; padding: 0.25rem 0.5rem; text-align: left; }

@@ -1,0 +1,5 @@
+# trip-planner agent — same stack as host/ (no new dependencies)
+langchain>=1.0                 # create_agent (the tool-call loop)
+langgraph>=0.2                 # agent runtime used by langchain
+langchain-mcp-adapters>=0.1    # MultiServerMCPClient: MCP tools -> LangChain tools
+langchain-google-vertexai>=2.0 # Gemini via Vertex AI

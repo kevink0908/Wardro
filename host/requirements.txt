@@ -1,0 +1,9 @@
+# host — the MCP HOST: FastAPI backend (port 8080)
+fastapi>=0.110                 # backend.py web framework
+uvicorn>=0.29                  # ASGI server that runs backend.py
+langchain>=1.0                 # create_agent (the tool-call loop)
+langgraph>=0.2                 # agent runtime under langchain
+langchain-mcp-adapters>=0.1    # MultiServerMCPClient (NOTE: this pulls in `mcp`)
+langchain-google-genai>=2.0    # Gemini via the Gemini API (AI Studio key)
+langchain-google-vertexai>=2.0 # (old) Gemini via Vertex AI — needs GCP billing
+python-dotenv>=1.0             # load .env so keys stay out of code

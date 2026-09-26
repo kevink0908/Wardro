@@ -62,8 +62,8 @@ db.sqlite3
 db.sqlite3-journal
 
 # Wardro's local SQLite database (each user generates their own)
-wardro.db
-wardro.db-journal
+data/*.db
+data/*.db-journal
 
 # Flask stuff:
 instance/
@@ -209,3 +209,26 @@ cython_debug/
 marimo/_static/
 marimo/_lsp/
 __marimo__/
+
+# ── Wardro: keep the public repo small and clean ──
+# macOS / editor clutter
+.DS_Store
+.vscode/
+_to_delete/
+scratch.py
+scratch.js
+
+# Old experiments and duplicate photos (hundreds of MB)
+_archive/
+
+# Personal closet photos (~18 MB each) + a 353 MB zip — too large for GitHub
+data/wardrobe_images/
+data/*.zip
+
+# Personal study / internship notes (README screenshots in docs/images ARE committed)
+docs/*.md
+COPILOT_MIGRATION_PROMPT.md
+NORTHWIND_*.md
+copilot-sso-prompts.md
+mentor-sso-scope-message.md
+sso-glossary.md
