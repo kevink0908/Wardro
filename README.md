@@ -19,7 +19,7 @@ Under the hood, it is a hands-on study of the **Model Context Protocol (MCP)**. 
 - [How the Agent Loop Works](#how-the-agent-loop-works)
 - [Demo](#demo)
 - [Inside the Protocol: MCP Inspector](#inside-the-protocol-mcp-inspector)
-- [Host-Agnostic: The Same Servers in Claude Desktop](#host-agnostic-the-same-servers-in-claude-desktop)
+- [Host-Agnostic: Using Claude Desktop as MCP Host](#host-agnostic-using-claude-desktop-as-mcp-host)
 - [Code Highlights](#code-highlights)
 - [Tech Stack](#tech-stack)
 - [Setup & Run](#setup--run)
