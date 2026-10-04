@@ -145,7 +145,7 @@ The host doesn't hard-code any tools. At startup it asks both servers for their 
 <img src="docs/images/inspector-search-closet-jsonrpc.png" alt="Raw JSON-RPC for search_closet">
 </details>
 
-## Host-Agnostic: The Same Servers in Claude Desktop
+## Host-Agnostic: Using Claude Desktop as MCP Host
 
 The same `server.py` files run unchanged inside **Claude Desktop**. The only difference is the transport: Claude Desktop launches each server itself and talks over **stdio**, while the web backend connects over **Streamable HTTP**.
 
